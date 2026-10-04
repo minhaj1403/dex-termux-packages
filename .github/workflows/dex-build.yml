@@ -21,9 +21,9 @@ on:
         type: string
         default: ""
       use_repo:
-        description: "Download dependencies already published in the Dex repository instead of building them"
+        description: "Download dependencies from the Dex repository instead of building them (pulls in some, like LLVM, that are not published yet)"
         type: boolean
-        default: true
+        default: false
       from_run:
         description: "Also publish the debs of this earlier run id"
         type: string
