@@ -4,6 +4,8 @@
 # https://minhaj1403.github.io/dex-packages (the url in sources.list and the mirror of pkg).
 #
 # Usage: dex/publish-repo.sh [--push]
+# Environment: DEX_REPO_DIR (the clone, default ../dex-packages), GNUPGHOME (with the signing
+# key, default ~/.dex-repo-gnupg), DEX_REPO_COMMIT_MESSAGE.
 set -euo pipefail
 
 PKGS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,23 +32,30 @@ for deb in "${debs[@]}"; do
 	cp -p "$deb" "$dir/"
 done
 
-# Index and Release are generated with apt-ftparchive in an Ubuntu container
-docker run --rm --platform linux/arm64 -v "$REPO_DIR:/repo" -w /repo ubuntu:24.04 bash -euc "
-	apt-get update -qq >/dev/null && apt-get install -y -qq apt-utils >/dev/null
+# Index and Release are generated with apt-ftparchive, in an Ubuntu container if not on Linux
+index_script="
 	mkdir -p dists/$DIST/$COMPONENT/binary-$ARCH
 	apt-ftparchive packages pool/$COMPONENT > dists/$DIST/$COMPONENT/binary-$ARCH/Packages
 	gzip -9kf dists/$DIST/$COMPONENT/binary-$ARCH/Packages
-	apt-ftparchive \
-		-o APT::FTPArchive::Release::Origin=Dex \
-		-o APT::FTPArchive::Release::Label=Dex \
-		-o APT::FTPArchive::Release::Suite=$DIST \
-		-o APT::FTPArchive::Release::Codename=$DIST \
-		-o APT::FTPArchive::Release::Architectures=$ARCH \
-		-o APT::FTPArchive::Release::Components=$COMPONENT \
-		-o APT::FTPArchive::Release::Description='Packages for Dex (com.dex)' \
+	apt-ftparchive \\
+		-o APT::FTPArchive::Release::Origin=Dex \\
+		-o APT::FTPArchive::Release::Label=Dex \\
+		-o APT::FTPArchive::Release::Suite=$DIST \\
+		-o APT::FTPArchive::Release::Codename=$DIST \\
+		-o APT::FTPArchive::Release::Architectures=$ARCH \\
+		-o APT::FTPArchive::Release::Components=$COMPONENT \\
+		-o APT::FTPArchive::Release::Description='Packages for Dex (com.dex)' \\
 		release dists/$DIST > /tmp/Release
 	mv /tmp/Release dists/$DIST/Release
 "
+if command -v apt-ftparchive >/dev/null; then
+	(cd "$REPO_DIR" && bash -euc "$index_script")
+else
+	docker run --rm --platform linux/arm64 -v "$REPO_DIR:/repo" -w /repo ubuntu:24.04 bash -euc "
+		apt-get update -qq >/dev/null && apt-get install -y -qq apt-utils >/dev/null
+		$index_script
+	"
+fi
 
 cd "$REPO_DIR"
 rm -f "dists/$DIST/InRelease" "dists/$DIST/Release.gpg"
@@ -58,6 +67,6 @@ touch .nojekyll
 echo "Repository has $(grep -c '^Package:' "dists/$DIST/$COMPONENT/binary-$ARCH/Packages") packages"
 if [ "${1:-}" = "--push" ]; then
 	git add -A
-	git commit -q -m "Update packages" || echo "Nothing changed"
+	git commit -q -m "${DEX_REPO_COMMIT_MESSAGE:-Update packages}" || echo "Nothing changed"
 	git push -q origin HEAD
 fi

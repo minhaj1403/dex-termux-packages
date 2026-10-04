@@ -1,17 +1,20 @@
-# Builds packages for Dex (com.dex) for aarch64 on demand: the packages of the bootstrap, or
-# the given ones. The built debs are uploaded as an artifact, and signed and published to the
-# Dex apt repository (github.com/minhaj1403/dex-packages) from a local machine with
-# dex/publish-repo.sh. The bootstrap is then generated from the repository with
-# scripts/generate-bootstraps.sh.
+# Builds packages for Dex (com.dex) for aarch64 on demand, signs and publishes them to the Dex
+# apt repository (github.com/minhaj1403/dex-packages, served at
+# https://minhaj1403.github.io/dex-packages), and generates the bootstrap of the app from it.
+#
+# - bootstrap: build the packages of the bootstrap (and any given ones), publish them, and
+#   generate the bootstrap, which is uploaded as an artifact and saved in the repository.
+# - packages: build and publish the given packages.
+# - publish: publish the debs built by an earlier run (from_run), without building.
 name: Dex build
 
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: "What to build"
+        description: "What to do"
         type: choice
-        options: [bootstrap, packages]
+        options: [bootstrap, packages, publish]
         default: bootstrap
       packages:
         description: "Space separated packages: built with the bootstrap packages, or the packages to build"
@@ -20,10 +23,25 @@ on:
       use_repo:
         description: "Download dependencies already published in the Dex repository instead of building them"
         type: boolean
-        default: false
+        default: true
+      from_run:
+        description: "Also publish the debs of this earlier run id"
+        type: string
+        default: ""
 
 permissions:
   contents: read
+  actions: read
+
+concurrency:
+  group: dex-build
+  cancel-in-progress: false
+
+env:
+  BOOTSTRAP_PACKAGES: >-
+    apt bash bzip2 command-not-found coreutils curl dash diffutils findutils gawk grep gzip less
+    procps psmisc sed tar termux-core termux-exec termux-keyring termux-tools util-linux xz-utils
+    ed debianutils dos2unix inetutils lsof nano net-tools patch unzip
 
 jobs:
   build:
@@ -33,11 +51,28 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Free disk space
+        if: inputs.target != 'publish'
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
           df -h /
 
+      - name: Get debs of an earlier run
+        if: inputs.from_run != ''
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.from_run }}
+          github-token: ${{ github.token }}
+          path: earlier-run
+
+      - name: Unpack debs of an earlier run
+        if: inputs.from_run != ''
+        run: |
+          mkdir -p output
+          for archive in earlier-run/*/dex-debs.tar; do tar -xf "$archive" -C output; done
+          ls output | wc -l
+
       - name: Build
+        if: inputs.target != 'publish'
         env:
           TARGET: ${{ inputs.target }}
           PACKAGES: ${{ inputs.packages }}
@@ -45,11 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$TARGET" = bootstrap ]; then
-            # The packages that scripts/generate-bootstraps.sh puts in the bootstrap. The
-            # bootstrap is generated from the published repository, with their dependencies.
-            names="apt bash bzip2 command-not-found coreutils curl dash diffutils findutils gawk grep
-              gzip less procps psmisc sed tar termux-core termux-exec termux-keyring termux-tools
-              util-linux xz-utils ed debianutils dos2unix inetutils lsof nano net-tools patch unzip $PACKAGES"
+            names="$BOOTSTRAP_PACKAGES $PACKAGES"
           else
             [ -n "$PACKAGES" ] || { echo "No packages given" >&2; exit 1; }
             names="$PACKAGES"
@@ -71,6 +102,9 @@ jobs:
             [[ " ${recipes[*]-} " == *" $recipe "* ]] || recipes+=("$recipe")
           done
 
+          # The Dex repository is signed with its own key, which the builder image does not have
+          ./scripts/run-docker.sh gpg --batch --import packages/termux-keyring/dex.gpg
+
           args=(-a aarch64)
           [ "$USE_REPO" = true ] && args+=(-I)
           echo "Building: ${recipes[*]}"
@@ -80,14 +114,81 @@ jobs:
         if: always()
         run: |
           # One archive, since artifact file names cannot contain the colons of deb epochs
-          [ -d output ] || exit 0
-          cd output && tar -cf ../dex-debs.tar *.deb && cd .. && ls -la dex-debs.tar && ls output | wc -l
+          if ls output/*.deb >/dev/null 2>&1; then
+            (cd output && tar -cf ../dex-debs.tar *.deb)
+            ls output | wc -l
+          fi
 
-      - name: Upload
+      - name: Upload debs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dex-${{ inputs.target }}-${{ github.run_number }}
+          name: dex-debs-${{ github.run_number }}
           path: dex-debs.tar
-          if-no-files-found: warn
-          retention-days: 14
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Packages that were built are published even if a later one failed, so the next run
+      # can download them instead of building them again
+      - name: Check out the Dex repository
+        if: always()
+        uses: actions/checkout@v4
+        with:
+          repository: minhaj1403/dex-packages
+          ssh-key: ${{ secrets.DEX_PACKAGES_DEPLOY_KEY }}
+          path: .dex-repo
+
+      - name: Publish
+        if: always()
+        env:
+          SIGNING_KEY: ${{ secrets.DEX_REPO_SIGNING_KEY }}
+          DEX_REPO_DIR: ${{ github.workspace }}/.dex-repo
+          DEX_REPO_COMMIT_MESSAGE: "Update packages (dex-termux-packages run ${{ github.run_id }})"
+        run: |
+          set -euo pipefail
+          if ! ls output/*.deb >/dev/null 2>&1; then echo "No debs to publish"; exit 0; fi
+          export GNUPGHOME="$(mktemp -d)"
+          echo "$SIGNING_KEY" | gpg --batch --import
+          cd .dex-repo
+          git config user.name "Dex build"
+          git config user.email "dex-build@users.noreply.github.com"
+          cd ..
+          ./dex/publish-repo.sh --push
+
+      - name: Generate bootstrap
+        if: inputs.target == 'bootstrap'
+        env:
+          PACKAGES: ${{ inputs.packages }}
+        run: |
+          set -euo pipefail
+          # From the published repository on disk, which has the same content as the one
+          # GitHub Pages serves once deployed
+          args=(--architectures aarch64 -r "file://$GITHUB_WORKSPACE/.dex-repo")
+          [ -n "$PACKAGES" ] && args+=(-a "$(echo $PACKAGES | tr ' ' ',')")
+          ./scripts/generate-bootstraps.sh "${args[@]}"
+          ls -la bootstrap-*.zip
+          sha256sum bootstrap-aarch64.zip
+
+      - name: Save bootstrap in the Dex repository
+        if: inputs.target == 'bootstrap'
+        run: |
+          set -euo pipefail
+          # Saved by date and run, and downloaded by the app build with its checksum
+          version="$(date -u +%Y.%m.%d)-r${{ github.run_number }}"
+          mkdir -p ".dex-repo/bootstrap/$version"
+          cp bootstrap-aarch64.zip ".dex-repo/bootstrap/$version/"
+          (cd ".dex-repo/bootstrap/$version" && sha256sum bootstrap-aarch64.zip > bootstrap-aarch64.zip.sha256)
+          cd .dex-repo
+          git add -A
+          git commit -q -m "Add bootstrap $version"
+          git push -q origin HEAD
+          echo "Bootstrap $version: https://minhaj1403.github.io/dex-packages/bootstrap/$version/bootstrap-aarch64.zip"
+          cat "bootstrap/$version/bootstrap-aarch64.zip.sha256"
+
+      - name: Upload bootstrap
+        if: inputs.target == 'bootstrap'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dex-bootstrap-${{ github.run_number }}
+          path: bootstrap-aarch64.zip
+          retention-days: 30
