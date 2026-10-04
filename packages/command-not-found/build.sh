@@ -12,4 +12,15 @@ termux_step_pre_configure() {
 	export TERMUX_PREFIX
 	export TERMUX_SCRIPTDIR
 	termux_setup_nodejs
+
+	# Dex: the commands of packages are looked up in the file lists of the Termux
+	# repositories, since packages are named the same, but their paths are in
+	# com.termux, and the repository of Dex may not have all packages yet
+	export DEX_CNF_REPO_JSON="$TERMUX_PKG_TMPDIR/termux-repo.json"
+	jq '.packages.url = "https://packages-cf.termux.dev/apt/termux-main"' \
+		"$TERMUX_SCRIPTDIR/repo.json" > "$DEX_CNF_REPO_JSON"
+	sed -i \
+		-e 's|join(TERMUX_SCRIPTDIR, "repo.json")|process.env.DEX_CNF_REPO_JSON|' \
+		-e 's|TERMUX_PREFIX.substring(1)|"data/data/com.termux/files/usr"|g' \
+		"$TERMUX_PKG_SRCDIR/generate-db.js"
 }
