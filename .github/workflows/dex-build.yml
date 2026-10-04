@@ -21,9 +21,13 @@ on:
         type: string
         default: ""
       use_repo:
-        description: "Download dependencies from the Dex repository instead of building them (pulls in some, like LLVM, that are not published yet)"
+        description: "Download dependencies from the Dex repository instead of building them"
         type: boolean
-        default: false
+        default: true
+      skip_published:
+        description: "Skip packages that are already in the Dex repository (by name)"
+        type: boolean
+        default: true
       from_run:
         description: "Also publish the debs of this earlier run id"
         type: string
@@ -77,6 +81,7 @@ jobs:
           TARGET: ${{ inputs.target }}
           PACKAGES: ${{ inputs.packages }}
           USE_REPO: ${{ inputs.use_repo }}
+          SKIP_PUBLISHED: ${{ inputs.skip_published }}
         run: |
           set -euo pipefail
           if [ "$TARGET" = bootstrap ]; then
@@ -101,6 +106,17 @@ jobs:
             fi
             [[ " ${recipes[*]-} " == *" $recipe "* ]] || recipes+=("$recipe")
           done
+
+          # Packages already published are not built again, so only new ones take time
+          if [ "$SKIP_PUBLISHED" = true ]; then
+            published="$(curl -fsSL https://minhaj1403.github.io/dex-packages/dists/stable/main/binary-aarch64/Packages | awk '/^Package:/ {print $2}')"
+            missing=()
+            for recipe in "${recipes[@]}"; do
+              if grep -qx "$recipe" <<< "$published"; then echo "$recipe is published, skipping"; else missing+=("$recipe"); fi
+            done
+            recipes=("${missing[@]+"${missing[@]}"}")
+          fi
+          if [ ${#recipes[@]} -eq 0 ]; then echo "Nothing to build"; exit 0; fi
 
           # The Dex repository is signed with its own key, which the builder image does not have
           ./scripts/run-docker.sh gpg --batch --import packages/termux-keyring/dex.gpg
