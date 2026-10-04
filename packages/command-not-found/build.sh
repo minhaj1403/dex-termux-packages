@@ -15,11 +15,17 @@ termux_step_pre_configure() {
 
 	# Dex: the commands of packages are looked up in the file lists of the Termux
 	# repositories, since packages are named the same, but their paths are in
-	# com.termux, and the repository of Dex may not have all packages yet. The
-	# repository name sets the name of the generated header, commands-$arch-termux-main.h
+	# com.termux, and the repository of Dex may not have all packages yet. A
+	# header is generated for each repository, by name, and all are included.
 	export DEX_CNF_REPO_JSON="$TERMUX_PKG_TMPDIR/termux-repo.json"
-	jq '.packages.url = "https://packages-cf.termux.dev/apt/termux-main" | .packages.name = "termux-main"' \
-		"$TERMUX_SCRIPTDIR/repo.json" > "$DEX_CNF_REPO_JSON"
+	cat > "$DEX_CNF_REPO_JSON" <<- EOF
+	{
+	  "pkg_format": "debian",
+	  "packages": {"name": "termux-main", "distribution": "stable", "component": "main", "url": "https://packages-cf.termux.dev/apt/termux-main"},
+	  "root-packages": {"name": "termux-root", "distribution": "root", "component": "stable", "url": "https://packages-cf.termux.dev/apt/termux-root"},
+	  "x11-packages": {"name": "termux-x11", "distribution": "x11", "component": "main", "url": "https://packages-cf.termux.dev/apt/termux-x11"}
+	}
+	EOF
 	sed -i \
 		-e 's|join(TERMUX_SCRIPTDIR, "repo.json")|process.env.DEX_CNF_REPO_JSON|' \
 		-e 's|TERMUX_PREFIX.substring(1)|"data/data/com.termux/files/usr"|g' \
