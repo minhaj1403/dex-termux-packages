@@ -3,7 +3,7 @@ TERMUX_PKG_DESCRIPTION="Basic system tools for Termux"
 TERMUX_PKG_LICENSE="GPL-3.0"
 TERMUX_PKG_MAINTAINER="@termux"
 TERMUX_PKG_VERSION="1.46.0+really1.45.0"
-TERMUX_PKG_REVISION=1
+TERMUX_PKG_REVISION=2
 TERMUX_PKG_SRCURL=https://github.com/termux/termux-tools/archive/refs/tags/v1.45.0.tar.gz
 TERMUX_PKG_SHA256=1ae29b1b875d95cc626dae323b45a2ace759969862d96094b2fa6d13bffe20d2
 TERMUX_PKG_ESSENTIAL=true
@@ -22,6 +22,15 @@ TERMUX_PKG_DEPENDS="bzip2, coreutils, curl, dash, diffutils, findutils, gawk, gr
 TERMUX_PKG_RECOMMENDS="ed, dos2unix, inetutils, net-tools, patch, unzip"
 
 termux_step_pre_configure() {
+	# Dex: configure uses com.termux paths unless these are set. The classes of the
+	# app keep the com.termux namespace, so components are named by it.
+	export TERMUX_APP_PACKAGE="$TERMUX_APP__PACKAGE_NAME"
+	export TERMUX_BASE_DIR="$TERMUX__ROOTFS"
+	export TERMUX_CACHE_DIR="$TERMUX__CACHE_DIR"
+	export TERMUX_PREFIX
+	export TERMUX_ANDROID_HOME
+	sed -i "s|@TERMUX_APP_PACKAGE@/@TERMUX_APP_PACKAGE@\.app\.|@TERMUX_APP_PACKAGE@/$TERMUX_APP__NAMESPACE.app.|g" "$TERMUX_PKG_SRCDIR"/scripts/*.in
+
 	autoreconf -vfi
 }
 
