@@ -1,6 +1,8 @@
-# Builds the Dex (com.dex) bootstrap or packages for aarch64 on demand. The built debs and
-# bootstrap are uploaded as an artifact, and signed and published to the Dex apt repository
-# (github.com/minhaj1403/dex-packages) from a local machine with dex/publish-repo.sh.
+# Builds packages for Dex (com.dex) for aarch64 on demand: the packages of the bootstrap, or
+# the given ones. The built debs are uploaded as an artifact, and signed and published to the
+# Dex apt repository (github.com/minhaj1403/dex-packages) from a local machine with
+# dex/publish-repo.sh. The bootstrap is then generated from the repository with
+# scripts/generate-bootstraps.sh.
 name: Dex build
 
 on:
@@ -12,13 +14,13 @@ on:
         options: [bootstrap, packages]
         default: bootstrap
       packages:
-        description: "Space separated packages: added to the bootstrap, or the packages to build"
+        description: "Space separated packages: built with the bootstrap packages, or the packages to build"
         type: string
         default: ""
       use_repo:
         description: "Download dependencies already published in the Dex repository instead of building them"
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: read
@@ -43,24 +45,45 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$TARGET" = bootstrap ]; then
-            args=(--architectures aarch64)
-            [ -n "$PACKAGES" ] && args+=(-a "$(echo $PACKAGES | tr ' ' ',')")
-            ./scripts/run-docker.sh ./scripts/build-bootstraps.sh "${args[@]}"
+            # The packages that scripts/generate-bootstraps.sh puts in the bootstrap. The
+            # bootstrap is generated from the published repository, with their dependencies.
+            names="apt bash bzip2 command-not-found coreutils curl dash diffutils findutils gawk grep
+              gzip less procps psmisc sed tar termux-core termux-exec termux-keyring termux-tools
+              util-linux xz-utils ed debianutils dos2unix inetutils lsof nano net-tools patch unzip $PACKAGES"
           else
             [ -n "$PACKAGES" ] || { echo "No packages given" >&2; exit 1; }
-            args=(-a aarch64)
-            [ "$USE_REPO" = true ] && args+=(-I)
-            ./scripts/run-docker.sh ./build-package.sh "${args[@]}" $PACKAGES
+            names="$PACKAGES"
           fi
-          ls -la output/ bootstrap-*.zip 2>/dev/null || true
+
+          # Subpackages, like bzip2 of libbz2, are built by building their parent package
+          recipes=()
+          for name in $names; do
+            recipe="$name"
+            if ! ls -d {packages,root-packages,x11-packages}/"$name" >/dev/null 2>&1; then
+              subpackage="$(ls {packages,root-packages,x11-packages}/*/"$name".subpackage.sh 2>/dev/null | head -n 1)"
+              [ -n "$subpackage" ] || { echo "No recipe for $name" >&2; exit 1; }
+              recipe="$(basename "$(dirname "$subpackage")")"
+              echo "$name is built by $recipe"
+            fi
+            [[ " ${recipes[*]} " == *" $recipe "* ]] || recipes+=("$recipe")
+          done
+
+          args=(-a aarch64)
+          [ "$USE_REPO" = true ] && args+=(-I)
+          echo "Building: ${recipes[*]}"
+          ./scripts/run-docker.sh ./build-package.sh "${args[@]}" "${recipes[@]}"
+
+      - name: Pack debs
+        if: always()
+        run: |
+          # One archive, since artifact file names cannot contain the colons of deb epochs
+          cd output && tar -cf ../dex-debs.tar *.deb && cd .. && ls -la dex-debs.tar && ls output | wc -l
 
       - name: Upload
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dex-${{ inputs.target }}-${{ github.run_number }}
-          path: |
-            output/*.deb
-            bootstrap-*.zip
+          path: dex-debs.tar
           if-no-files-found: warn
           retention-days: 14
