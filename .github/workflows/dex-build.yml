@@ -59,13 +59,16 @@ jobs:
           recipes=()
           for name in $names; do
             recipe="$name"
-            if ! ls -d {packages,root-packages,x11-packages}/"$name" >/dev/null 2>&1; then
-              subpackage="$(ls {packages,root-packages,x11-packages}/*/"$name".subpackage.sh 2>/dev/null | head -n 1)"
+            if [ ! -f "packages/$name/build.sh" ] && [ ! -f "root-packages/$name/build.sh" ] && [ ! -f "x11-packages/$name/build.sh" ]; then
+              subpackage=""
+              for file in {packages,root-packages,x11-packages}/*/"$name".subpackage.sh; do
+                if [ -f "$file" ]; then subpackage="$file"; break; fi
+              done
               [ -n "$subpackage" ] || { echo "No recipe for $name" >&2; exit 1; }
               recipe="$(basename "$(dirname "$subpackage")")"
               echo "$name is built by $recipe"
             fi
-            [[ " ${recipes[*]} " == *" $recipe "* ]] || recipes+=("$recipe")
+            [[ " ${recipes[*]-} " == *" $recipe "* ]] || recipes+=("$recipe")
           done
 
           args=(-a aarch64)
@@ -77,6 +80,7 @@ jobs:
         if: always()
         run: |
           # One archive, since artifact file names cannot contain the colons of deb epochs
+          [ -d output ] || exit 0
           cd output && tar -cf ../dex-debs.tar *.deb && cd .. && ls -la dex-debs.tar && ls output | wc -l
 
       - name: Upload
