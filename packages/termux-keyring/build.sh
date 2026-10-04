@@ -1,5 +1,5 @@
 TERMUX_PKG_HOMEPAGE=https://github.com/termux
-TERMUX_PKG_DESCRIPTION="GPG public keys for the official Termux repositories"
+TERMUX_PKG_DESCRIPTION="GPG public key for the Dex package repository"
 TERMUX_PKG_LICENSE="Apache-2.0"
 TERMUX_PKG_MAINTAINER="@termux"
 TERMUX_PKG_VERSION=3.14
@@ -15,20 +15,9 @@ termux_step_make_install() {
 	rm -rf "$GPG_SHARE_DIR"
 	mkdir -p "$GPG_SHARE_DIR"
 
-	# Maintainer-specific keys.
-	install -Dm600 "$TERMUX_PKG_BUILDER_DIR/agnostic-apollo.gpg" "$GPG_SHARE_DIR"
-	install -Dm600 "$TERMUX_PKG_BUILDER_DIR/grimler.gpg" "$GPG_SHARE_DIR"
-	install -Dm600 "$TERMUX_PKG_BUILDER_DIR/kcubeterm.gpg" "$GPG_SHARE_DIR"
-	install -Dm600 "$TERMUX_PKG_BUILDER_DIR/landfillbaby.gpg" "$GPG_SHARE_DIR"
-	install -Dm600 "$TERMUX_PKG_BUILDER_DIR/mradityaalok.gpg" "$GPG_SHARE_DIR"
-	install -Dm600 "$TERMUX_PKG_BUILDER_DIR/2096779623.gpg" "$GPG_SHARE_DIR"
-	install -Dm600 "$TERMUX_PKG_BUILDER_DIR/thunder-coding.gpg" "$GPG_SHARE_DIR"
-
-	# Key for automatic builds (via CI).
-	install -Dm600 "$TERMUX_PKG_BUILDER_DIR/termux-autobuilds.gpg" "$GPG_SHARE_DIR"
-
-	# Key for pacman package manager.
-	install -Dm600 "$TERMUX_PKG_BUILDER_DIR/termux-pacman.gpg" "$GPG_SHARE_DIR"
+	# Dex: only the key of the Dex package repository is trusted, since
+	# packages from the Termux repositories are built for com.termux
+	install -Dm600 "$TERMUX_PKG_BUILDER_DIR/dex.gpg" "$GPG_SHARE_DIR"
 
 	# Create symlinks under all GPG_DIRs to key files under GPG_SHARE_DIR
 	for GPG_DIR in "$TERMUX_PREFIX/etc/apt/trusted.gpg.d" "$TERMUX_PREFIX/share/pacman/keyrings"; do

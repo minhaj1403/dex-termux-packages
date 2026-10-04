@@ -26,7 +26,17 @@ termux_step_pre_configure() {
 }
 
 termux_step_post_make_install() {
-	TERMUX_PKG_CONFFILES="$(cat "$TERMUX_PKG_BUILDDIR/conffiles")"
+	# Dex: Termux mirrors serve packages built for com.termux, which do not work
+	# here, so the Dex repository is the only mirror
+	local mirrors_dir="$TERMUX_PREFIX/etc/termux/mirrors"
+	rm -rf "$mirrors_dir"/{asia,chinese_mainland,europe,north_america,oceania,russia}
+	cat > "$mirrors_dir/default" <<- EOF
+	# This file is sourced by pkg
+	# The Dex package repository
+	WEIGHT=10
+	MAIN="https://minhaj1403.github.io/dex-packages"
+	EOF
+	TERMUX_PKG_CONFFILES="$(grep -v -E 'etc/termux/mirrors/(asia|chinese_mainland|europe|north_america|oceania|russia)/' "$TERMUX_PKG_BUILDDIR/conffiles")"
 }
 
 termux_step_create_debscripts() {

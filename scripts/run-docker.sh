@@ -89,7 +89,9 @@ UNAME=$(uname)
 if [ "$UNAME" = Darwin ]; then
 	# Workaround for mac readlink not supporting -f.
 	REPOROOT=$PWD
-	SEC_OPT=""
+	# Dex: Docker on macOS runs in a Linux VM (Colima), which has FUSE for the
+	# fuse-overlayfs mount of the NDK toolchain, like on Linux
+	SEC_OPT=" --cap-add CAP_SYS_ADMIN --device /dev/fuse --security-opt apparmor=unconfined"
 else
 	REPOROOT="$(dirname $(readlink -f $0))/../"
 	SEC_OPT=" --security-opt seccomp=$REPOROOT/scripts/profile.json --security-opt apparmor=_custom-termux-package-builder-$CONTAINER_NAME --cap-add CAP_SYS_ADMIN --device /dev/fuse"
