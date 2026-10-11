@@ -3,7 +3,7 @@ TERMUX_PKG_DESCRIPTION="Basic system tools for Termux"
 TERMUX_PKG_LICENSE="GPL-3.0"
 TERMUX_PKG_MAINTAINER="@termux"
 TERMUX_PKG_VERSION="1.46.0+really1.45.0"
-TERMUX_PKG_REVISION=2
+TERMUX_PKG_REVISION=3
 TERMUX_PKG_SRCURL=https://github.com/termux/termux-tools/archive/refs/tags/v1.45.0.tar.gz
 TERMUX_PKG_SHA256=1ae29b1b875d95cc626dae323b45a2ace759969862d96094b2fa6d13bffe20d2
 TERMUX_PKG_ESSENTIAL=true
@@ -30,6 +30,9 @@ termux_step_pre_configure() {
 	export TERMUX_PREFIX
 	export TERMUX_ANDROID_HOME
 	sed -i "s|@TERMUX_APP_PACKAGE@/@TERMUX_APP_PACKAGE@\.app\.|@TERMUX_APP_PACKAGE@/$TERMUX_APP__NAMESPACE.app.|g" "$TERMUX_PKG_SRCDIR"/scripts/*.in
+	# Dex: with no mirror chosen, pkg also looks in the mirror groups of Termux, which are
+	# removed below, and stops when find fails, so it uses only the default mirror
+	sed -i '/mirrors+=(\$(find \${MIRROR_BASE_DIR}\/{asia,/d' "$TERMUX_PKG_SRCDIR"/scripts/pkg.in
 
 	autoreconf -vfi
 }
@@ -51,5 +54,15 @@ termux_step_post_make_install() {
 termux_step_create_debscripts() {
 	cat <<- EOF > ./preinst
 	$(cat "$TERMUX_PKG_BUILDDIR/preinst")
+	EOF
+
+	# Dex: choose the Dex repository, the only mirror, unless a mirror was chosen already.
+	# Run by the bootstrap's second stage on the first start too
+	cat <<- EOF > ./postinst
+	#!$TERMUX_PREFIX/bin/sh
+	if [ ! -e "$TERMUX_PREFIX/etc/termux/chosen_mirrors" ] && [ ! -L "$TERMUX_PREFIX/etc/termux/chosen_mirrors" ]; then
+		ln -s mirrors/default "$TERMUX_PREFIX/etc/termux/chosen_mirrors"
+	fi
+	exit 0
 	EOF
 }
