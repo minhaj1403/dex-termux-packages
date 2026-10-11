@@ -3,7 +3,7 @@ TERMUX_PKG_DESCRIPTION="Basic system tools for Termux"
 TERMUX_PKG_LICENSE="GPL-3.0"
 TERMUX_PKG_MAINTAINER="@termux"
 TERMUX_PKG_VERSION="1.46.0+really1.45.0"
-TERMUX_PKG_REVISION=3
+TERMUX_PKG_REVISION=4
 TERMUX_PKG_SRCURL=https://github.com/termux/termux-tools/archive/refs/tags/v1.45.0.tar.gz
 TERMUX_PKG_SHA256=1ae29b1b875d95cc626dae323b45a2ace759969862d96094b2fa6d13bffe20d2
 TERMUX_PKG_ESSENTIAL=true
@@ -33,6 +33,19 @@ termux_step_pre_configure() {
 	# Dex: with no mirror chosen, pkg also looks in the mirror groups of Termux, which are
 	# removed below, and stops when find fails, so it uses only the default mirror
 	sed -i '/mirrors+=(\$(find \${MIRROR_BASE_DIR}\/{asia,/d' "$TERMUX_PKG_SRCDIR"/scripts/pkg.in
+	# Dex: the Dex repository is the only one, so termux-change-repo, which offers the mirrors
+	# of Termux, says so instead, and chooses it again if the choice was lost
+	cat > "$TERMUX_PKG_SRCDIR"/scripts/termux-change-repo.in <<- 'EOF'
+	#!@TERMUX_PREFIX@/bin/sh
+	chosen="@TERMUX_PREFIX@/etc/termux/chosen_mirrors"
+	if [ ! -e "$chosen" ]; then
+		rm -f "$chosen"
+		ln -s mirrors/default "$chosen" || exit 1
+	fi
+	echo "Dex has one package repository, built for Dex, so there is no mirror to choose:"
+	echo "  https://minhaj1403.github.io/dex-packages"
+	echo "Run 'pkg update' if installing packages fails."
+	EOF
 
 	autoreconf -vfi
 }
